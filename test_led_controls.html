@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controllo LED Raspberry Pi</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .section {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: white;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .section h2 {
+            margin-top: 0;
+            color: #555;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        button {
+            padding: 15px 20px;
+            font-size: 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #45a049;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        button.danger {
+            background-color: #f44336;
+        }
+        button.danger:hover {
+            background-color: #da190b;
+        }
+        button.effect {
+            background-color: #2196F3;
+        }
+        button.effect:hover {
+            background-color: #1976D2;
+        }
+        .color-controls {
+            margin-top: 20px;
+        }
+        .color-inputs {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        input[type="number"] {
+            width: 80px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        label {
+            font-weight: bold;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            border-radius: 4px;
+            display: none;
+        }
+        .status.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎨 Controllo LED Raspberry Pi</h1>
+    
+    <div class="section">
+        <h2>Imposta Colore RGB</h2>
+        <div class="color-controls">
+            <div class="color-inputs">
+                <label>R:</label>
+                <input type="number" id="r" min="0" max="255" value="255">
+                <label>G:</label>
+                <input type="number" id="g" min="0" max="255" value="0">
+                <label>B:</label>
+                <input type="number" id="b" min="0" max="255" value="0">
+                <button onclick="setColor()">Imposta Colore</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Controlli Base</h2>
+        <div class="controls">
+            <button onclick="callAPI('/turn-on')">Accendi Logo</button>
+            <button class="danger" onclick="callAPI('/turn-off')">Spegni Tutto</button>
+            <button onclick="callAPI('/flash')">Flash</button>
+            <button onclick="callAPI('/all-leds-on')">Tutti i LED</button>
+            <button onclick="callAPI('/border-led-on')">Bordo LED</button>
+            <button onclick="callAPI('/eyes-on')">Solo Occhi</button>
+            <button onclick="callAPI('/eyes-mouth-on')">Occhi + Bocca</button>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Effetti Animati</h2>
+        <div class="controls">
+            <button class="effect" onclick="callAPI('/rainbow-cycle')">🌈 Arcobaleno</button>
+            <button class="effect" onclick="callAPI('/pulse')">💓 Pulsazione</button>
+            <button class="effect" onclick="callAPI('/wave')">🌊 Onda</button>
+            <button class="effect" onclick="callAPI('/border-chase')">⚡ Inseguimento Bordo</button>
+            <button class="effect" onclick="callAPI('/eyes-blink')">👁️ Lampeggio Occhi</button>
+            <button class="effect" onclick="callAPI('/color-wheel')">🎨 Ruota Colori</button>
+            <button class="effect" onclick="callAPI('/fade-in-out')">✨ Fade In/Out</button>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Configurazione Server</h2>
+        <div class="color-inputs">
+            <label>Indirizzo IP Server:</label>
+            <input type="text" id="server-ip" placeholder="es. 172.20.10.4" style="width: 150px;">
+            <button onclick="saveServerIP()">Salva IP</button>
+            <button onclick="autoDetectIP()">Rileva Automaticamente</button>
+        </div>
+        <div id="ip-status" style="margin-top: 10px; font-size: 12px; color: #666;"></div>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <script>
+        // Carica l'IP salvato o usa quello corrente se si accede dalla stessa macchina
+        let API_BASE_URL = localStorage.getItem('led_server_ip') || '';
+        
+        // Se non c'è IP salvato, prova a rilevarlo automaticamente
+        if (!API_BASE_URL) {
+            // Se si accede da localhost, usa localhost
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                API_BASE_URL = 'http://localhost:5000';
+            } else {
+                // Altrimenti prova a rilevare dal server
+                autoDetectIP();
+            }
+        } else {
+            API_BASE_URL = `http://${API_BASE_URL}:5000`;
+            document.getElementById('server-ip').value = API_BASE_URL.replace('http://', '').replace(':5000', '');
+        }
+        
+        function saveServerIP() {
+            const ip = document.getElementById('server-ip').value.trim();
+            if (ip) {
+                localStorage.setItem('led_server_ip', ip);
+                API_BASE_URL = `http://${ip}:5000`;
+                document.getElementById('ip-status').textContent = `IP salvato: ${ip}`;
+                document.getElementById('ip-status').style.color = '#4CAF50';
+            }
+        }
+        
+        async function autoDetectIP() {
+            const statusDiv = document.getElementById('ip-status');
+            statusDiv.textContent = 'Rilevamento IP in corso...';
+            statusDiv.style.color = '#2196F3';
+            
+            // Prova alcuni hostname/IP comuni per Raspberry Pi
+            const commonHosts = [
+                'raspberrypi.local',
+                'raspberrypi',
+                window.location.hostname,
+                '172.20.10.4',
+                '192.168.1.100',
+                '192.168.0.100',
+                '192.168.1.101',
+                '192.168.0.101'
+            ];
+            
+            // Funzione per testare un host con timeout
+            async function testHost(host) {
+                return new Promise((resolve) => {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 2000);
+                    
+                    fetch(`http://${host}:5000/server-info`, {
+                        method: 'GET',
+                        mode: 'cors',
+                        signal: controller.signal
+                    })
+                    .then(response => {
+                        clearTimeout(timeoutId);
+                        if (response.ok) {
+                            return response.json();
+                        }
+                        throw new Error('Response not ok');
+                    })
+                    .then(data => {
+                        resolve({ success: true, ip: data.ip || host, host: host });
+                    })
+                    .catch(() => {
+                        clearTimeout(timeoutId);
+                        resolve({ success: false });
+                    });
+                });
+            }
+            
+            // Testa tutti gli host in parallelo
+            const results = await Promise.all(commonHosts.map(testHost));
+            const success = results.find(r => r.success);
+            
+            if (success) {
+                const detectedIP = success.ip;
+                localStorage.setItem('led_server_ip', detectedIP);
+                API_BASE_URL = `http://${detectedIP}:5000`;
+                document.getElementById('server-ip').value = detectedIP;
+                statusDiv.textContent = `✓ IP rilevato: ${detectedIP}`;
+                statusDiv.style.color = '#4CAF50';
+            } else {
+                statusDiv.textContent = '⚠ Impossibile rilevare automaticamente. Inserisci l\'IP manualmente.';
+                statusDiv.style.color = '#ff9800';
+            }
+        }
+        
+        // Prova a rilevare automaticamente all'avvio se non c'è IP salvato
+        if (!localStorage.getItem('led_server_ip')) {
+            setTimeout(autoDetectIP, 500);
+        }
+
+        function showStatus(message, isError = false) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = 'status show';
+            if (isError) {
+                statusDiv.style.backgroundColor = '#ffebee';
+                statusDiv.style.borderLeftColor = '#f44336';
+            } else {
+                statusDiv.style.backgroundColor = '#e7f3ff';
+                statusDiv.style.borderLeftColor = '#2196F3';
+            }
+            setTimeout(() => {
+                statusDiv.className = 'status';
+            }, 3000);
+        }
+
+        async function callAPI(endpoint) {
+            try {
+                const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+                const data = await response.json();
+                showStatus(data.message || 'Operazione completata!');
+            } catch (error) {
+                showStatus('Errore: ' + error.message, true);
+            }
+        }
+
+        async function setColor() {
+            const r = document.getElementById('r').value;
+            const g = document.getElementById('g').value;
+            const b = document.getElementById('b').value;
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/set-color?r=${r}&g=${g}&b=${b}`, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+                const data = await response.json();
+                showStatus(data.message || 'Colore impostato!');
+            } catch (error) {
+                showStatus('Errore: ' + error.message, true);
+            }
+        }
+    </script>
+</body>
+</html>
